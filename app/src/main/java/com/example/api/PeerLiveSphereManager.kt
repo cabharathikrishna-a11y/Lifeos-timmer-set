@@ -250,9 +250,8 @@ object PeerLiveSphereManager {
                                 }
                             }
 
-                            val leaderboardTodayMs = leaderboardPeer?.totalFocusMs ?: 0L
                             val arenaTodayMs = arenaSnapshot.childMs("TODAY/Total_Focus_Ms", "Todays_Focus_Ms", "todayFocusMs")
-                            val combinedTodayFocusMs = maxOf(todayFocusMsFromTimer, arenaTodayMs, leaderboardTodayMs)
+                            val combinedTodayFocusMs = maxOf(todayFocusMsFromTimer, arenaTodayMs)
 
                             val state = PeerLiveState(
                                 userId = friendId,

@@ -9434,13 +9434,14 @@ class AppViewModel(
                             val email2Norm = peerEmailClean.replace(".", "").replace("_", "").trim()
                             email1Norm == email2Norm
                         }
-                        val leaderboardTodayMs = matchedLeaderboardPeer?.totalFocusMs ?: 0L
-
-                        val baseTodayMs = maxOf(peer.todayFocusMs, leaderboardTodayMs)
+                        val liveBaseTodayMs = peer.todayFocusMs
                         val activeSessionFocusMs = com.example.api.TimelineSyncEngine.calculateAccumulatedFocusMs(peer.timeline, peer.status)
-                        val elapsedMs = baseTodayMs + maxOf(0L, activeSessionFocusMs)
+                        val liveComputedTotalMs = liveBaseTodayMs + maxOf(0L, activeSessionFocusMs)
+                        val leaderboardTotalMs = matchedLeaderboardPeer?.totalFocusMs ?: 0L
+
+                        val elapsedMs = maxOf(liveComputedTotalMs, leaderboardTotalMs)
                         val formattedTime = com.example.api.TimelineSyncEngine.formatTimeMsToHhMmSs(elapsedMs)
-                        val updatedPeerState = if (baseTodayMs > peer.todayFocusMs) peer.copy(todayFocusMs = baseTodayMs) else peer
+                        val updatedPeerState = peer
                         com.example.api.PeerUiCardModel(
                             peerState = updatedPeerState,
                             formattedLiveTime = formattedTime,

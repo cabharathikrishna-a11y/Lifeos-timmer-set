@@ -1,0 +1,13 @@
+tasks.register("testHttp") {
+    doLast {
+        def url = new URL("https://lifeosca.asia-southeast1.firebasedatabase.app/users.json")
+        try {
+            def connection = url.openConnection()
+            connection.setRequestMethod("GET")
+            println("Response code: " + connection.getResponseCode())
+            println("Response: " + connection.getInputStream().getText())
+        } catch (Exception e) {
+            println("Exception: " + e)
+        }
+    }
+}

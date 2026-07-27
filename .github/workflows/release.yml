@@ -1,0 +1,335 @@
+name: Automated Public Release Generation
+on:
+  push:
+    branches: [ main ]
+jobs:
+  release_pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Crucial: Gives the cloud runner permission to create a public release
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'zulu'
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '9.3.1'
+        validate-wrappers: false
+    - name: Regenerate Gradle Wrapper
+      run: gradle wrapper --gradle-version 9.3.1
+    - name: Grant Execute Permission for Gradle
+      run: chmod +x gradlew
+    - name: Get Version Info
+      id: get_version
+      run: |
+        LOCAL_CODE=$(grep -E 'versionCode\s*=\s*customCode\s*\?\:\s*[0-9]+' app/build.gradle.kts | sed -E 's/.*versionCode\s*=\s*customCode\s*\?\:\s*([0-9]+).*/\1/')
+        if [ -z "$LOCAL_CODE" ] || ! [[ "$LOCAL_CODE" =~ ^[0-9]+$ ]]; then
+          LOCAL_CODE=7
+        fi
+        
+        echo "Local fallback versionCode is $LOCAL_CODE"
+        
+        # Query Firebase Realtime Database for the last successful build's version code
+        DB_VAL=$(curl -s "https://lifeosca.asia-southeast1.firebasedatabase.app/versionId.json" | tr -d '"')
+        echo "Firebase DB versionId is: $DB_VAL"
+        if [ "$DB_VAL" = "null" ]; then
+          DB_VAL=""
+        fi
+        
+        NEW_VERSION_CODE=""
+        
+        if [ -n "$DB_VAL" ] && [[ "$DB_VAL" =~ ^[0-9]+$ ]]; then
+          NEW_VERSION_CODE=$((DB_VAL + 1))
+          echo "Determined version code from Firebase DB: $NEW_VERSION_CODE"
+        else
+          echo "Firebase DB fetch was invalid or empty. Trying GitHub Releases latest tag..."
+          # Fetch latest release tag from GitHub API (safeguard grep from failing step)
+          GH_TAG=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep -oP '"tag_name": "\s*v1.0.\K[0-9]+' || true)
+          if [ -n "$GH_TAG" ] && [[ "$GH_TAG" =~ ^[0-9]+$ ]]; then
+            NEW_VERSION_CODE=$((GH_TAG + 1))
+            echo "Determined version code from GitHub latest release: $NEW_VERSION_CODE"
+          else
+            NEW_VERSION_CODE=$((LOCAL_CODE + 1))
+            echo "Fallback to incremented local code: $NEW_VERSION_CODE"
+          fi
+        fi
+        
+        NEW_VERSION_NAME="${NEW_VERSION_CODE}.0"
+        
+        echo "Final VERSION_CODE: $NEW_VERSION_CODE"
+        echo "Final VERSION_NAME: $NEW_VERSION_NAME"
+        
+        echo "VERSION_CODE=$NEW_VERSION_CODE" >> $GITHUB_ENV
+        echo "VERSION_NAME=$NEW_VERSION_NAME" >> $GITHUB_ENV
+        echo "version_code=$NEW_VERSION_CODE" >> $GITHUB_OUTPUT
+        echo "version_name=$NEW_VERSION_NAME" >> $GITHUB_OUTPUT
+
+    # We compile the automated release APK using the dynamically determined versionCode and versionName
+    - name: Recreate Keystore File from Secret
+      env:
+        DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+      run: |
+        IS_VALID=false
+
+        # 1. Try decoding from GitHub Secrets
+        if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+          echo "Decoding DEBUG_KEYSTORE_BASE64 from GitHub Secrets..."
+          echo -n "$DEBUG_KEYSTORE_BASE64" | tr -d '\r\n[:space:]' > temp_secret_keystore.base64
+          base64 --decode temp_secret_keystore.base64 > debug.keystore 2>/dev/null || true
+          rm -f temp_secret_keystore.base64
+          
+          # Verify keystore
+          if [ -f "debug.keystore" ] && [ -s "debug.keystore" ]; then
+            if keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null 2>&1; then
+              echo "SUCCESS: Successfully decoded and verified debug.keystore from GitHub Secrets!"
+              IS_VALID=true
+            else
+              echo "WARNING: debug.keystore decoded from GitHub Secrets is invalid or corrupted."
+              rm -f debug.keystore
+            fi
+          fi
+        else
+          echo "INFO: DEBUG_KEYSTORE_BASE64 secret is empty or not set."
+        fi
+
+        # 2. Try decoding from repository debug.keystore.base64 fallback
+        if [ "$IS_VALID" = "false" ]; then
+          if [ -f "debug.keystore.base64" ]; then
+            echo "Attempting fallback: decoding from debug.keystore.base64 in repository..."
+            cat debug.keystore.base64 | tr -d '\r\n[:space:]' | base64 --decode > debug.keystore 2>/dev/null || true
+            
+            # Verify keystore
+            if [ -f "debug.keystore" ] && [ -s "debug.keystore" ]; then
+              if keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null 2>&1; then
+                echo "SUCCESS: Successfully decoded and verified debug.keystore from repository fallback!"
+                IS_VALID=true
+              else
+                echo "WARNING: Repository fallback debug.keystore.base64 decoded but is invalid."
+              fi
+            fi
+          fi
+        fi
+
+        # 3. If still invalid, fail the build to prevent signing with a different key!
+        if [ "$IS_VALID" = "false" ]; then
+          echo "CRITICAL ERROR: No valid debug.keystore could be retrieved from GitHub Secrets or fallback."
+          echo "To prevent generating an APK signed with a different key (which breaks app updates), we are failing this job."
+          echo "Please ensure you have configured the GitHub Secret: DEBUG_KEYSTORE_BASE64"
+          exit 1
+        fi
+
+        echo "Final Keystore diagnostics:"
+        keytool -list -keystore debug.keystore -storepass android
+
+    - name: Recreate google-services.json from Secret
+      env:
+        GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      run: |
+        if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+          echo "Writing GOOGLE_SERVICES_JSON from GitHub Secrets..."
+          echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+        else
+          echo "INFO: GOOGLE_SERVICES_JSON secret is empty. Using default or workspace google-services.json if present."
+        fi
+
+    - name: Compile Automated Release APK
+      run: |
+        ./gradlew assembleRelease -x lint -x test --no-daemon -PcustomVersionCode=${{ env.VERSION_CODE }} -PcustomVersionName="${{ env.VERSION_NAME }}"
+        cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Life OS.apk"
+        cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Life_OS.apk"
+
+    - name: Distribute Release APK to Firebase App Distribution
+      continue-on-error: true
+      env:
+        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_CREDENTIALS }}
+        FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        FIREBASE_GROUPS: ${{ secrets.FIREBASE_GROUPS }}
+        FIREBASE_TESTERS: ${{ secrets.FIREBASE_TESTERS }}
+      if: env.FIREBASE_SERVICE_ACCOUNT != '' && env.FIREBASE_APP_ID != ''
+      run: |
+        echo "$FIREBASE_SERVICE_ACCOUNT" > firebase-key.json
+        export GOOGLE_APPLICATION_CREDENTIALS=firebase-key.json
+        
+        CMD="npx firebase-tools appdistribution:distribute app/build/outputs/apk/release/app-release.apk --app \"$FIREBASE_APP_ID\""
+        CMD="$CMD --release-notes \"Automated release build #${{ github.run_number }} (Version Code: ${{ env.VERSION_CODE }}) uploaded via GitHub Actions.\""
+        
+        GROUPS_TO_USE="${FIREBASE_GROUPS:-testers}"
+        CMD="$CMD --groups \"$GROUPS_TO_USE\""
+        if [ -n "$FIREBASE_TESTERS" ]; then
+          CMD="$CMD --testers \"$FIREBASE_TESTERS\""
+        fi
+        
+        eval $CMD
+        rm -f firebase-key.json
+
+    - name: Download Previous Release APK and Install bsdiff
+      run: |
+        sudo apt-get update && sudo apt-get install -y bsdiff
+        
+        # Determine the latest release APK URL from GitHub Releases API
+        PREV_APK_URL=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep -oP '"browser_download_url": "\K[^"]+(Life%20OS\.apk|Life_OS\.apk|app-release\.apk)' | head -n 1 || true)
+        
+        if [ -n "$PREV_APK_URL" ]; then
+          echo "Downloading previous release APK from $PREV_APK_URL..."
+          curl -L -o previous.apk "$PREV_APK_URL" || true
+        else
+          echo "INFO: No previous release found. Skipping downloading."
+        fi
+        
+        if [ -f "previous.apk" ] && [ -s "previous.apk" ]; then
+          echo "Generating bsdiff patch..."
+          bsdiff previous.apk app/build/outputs/apk/release/app-release.apk patch.bsdiff
+          echo "Successfully generated patch.bsdiff ($(du -h patch.bsdiff | cut -f1))"
+        else
+          echo "INFO: Previous APK is unavailable or empty. Creating a dummy patch file to avoid release step failure."
+          echo "No previous release to compute patch." > patch.bsdiff
+        fi
+
+    - name: Generate Public GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v1.0.${{ env.VERSION_CODE }}
+        name: Release v1.0.${{ env.VERSION_CODE }}
+        draft: false
+        make_latest: "true"
+        body: |
+          Automated build updates compiled successfully via GitHub Actions.
+          Tracking Identifier: Build #${{ github.run_number }} (Version Code: ${{ env.VERSION_CODE }}, Version Name: ${{ env.VERSION_NAME }})
+        files: |
+          app/build/outputs/apk/release/Life OS.apk
+          app/build/outputs/apk/release/Life_OS.apk
+          app/build/outputs/apk/release/app-release.apk
+          patch.bsdiff
+
+    - name: Verify Public Download Links Integrity
+      run: |
+        VERSION_CODE=${{ env.VERSION_CODE }}
+        REPO_NAME="${{ github.repository }}"
+        TOKEN="${{ github.token }}"
+        
+        echo "Verifying that release links are active and reachable..."
+        
+        RELEASE_INFO=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${REPO_NAME}/releases/tags/v1.0.${VERSION_CODE}" || true)
+          
+        API_APK_URL=$(echo "$RELEASE_INFO" | grep -oP '"browser_download_url": "\K[^"]+(Life%20OS\.apk|Life_OS\.apk|app-release\.apk)' | head -n 1 || true)
+        API_PATCH_URL=$(echo "$RELEASE_INFO" | grep -oP '"browser_download_url": "\K[^"]+patch\.bsdiff' | head -n 1 || true)
+
+        APK_URL="${API_APK_URL:-https://github.com/${REPO_NAME}/releases/download/v1.0.$VERSION_CODE/Life%20OS.apk}"
+        PATCH_URL="${API_PATCH_URL:-https://github.com/${REPO_NAME}/releases/download/v1.0.$VERSION_CODE/patch.bsdiff}"
+
+        echo "APK Target URL: $APK_URL"
+        echo "Patch Target URL: $PATCH_URL"
+        
+        APK_SUCCESS=false
+        for i in {1..30}; do
+          echo "Verifying APK Link (Attempt $i)..."
+          CODE=$(curl -s -L -r 0-1024 -A "Mozilla/5.0" -H "Authorization: Bearer $TOKEN" -o /dev/null -w "%{http_code}" "$APK_URL" || true)
+          echo "HTTP Code: $CODE"
+          if [ "$CODE" = "200" ] || [ "$CODE" = "206" ] || [ "$CODE" = "302" ]; then
+            echo "SUCCESS: APK Download Link is verified!"
+            APK_SUCCESS=true
+            break
+          fi
+          if echo "$RELEASE_INFO" | grep -q '"assets"'; then
+            HAS_APK=$(echo "$RELEASE_INFO" | grep -i '\.apk' || true)
+            if [ -n "$HAS_APK" ]; then
+              echo "SUCCESS: APK asset confirmed via GitHub API!"
+              APK_SUCCESS=true
+              break
+            fi
+          fi
+          sleep 5
+          RELEASE_INFO=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO_NAME}/releases/tags/v1.0.${VERSION_CODE}" || true)
+        done
+        
+        if [ "$APK_SUCCESS" = "false" ]; then
+          echo "CRITICAL ERROR: APK Link verification timed out. Release may not be fully published."
+          exit 1
+        fi
+        
+        PATCH_SUCCESS=false
+        for i in {1..30}; do
+          echo "Verifying Patch Link (Attempt $i)..."
+          CODE=$(curl -s -L -r 0-1024 -A "Mozilla/5.0" -H "Authorization: Bearer $TOKEN" -o /dev/null -w "%{http_code}" "$PATCH_URL" || true)
+          echo "HTTP Code: $CODE"
+          if [ "$CODE" = "200" ] || [ "$CODE" = "206" ] || [ "$CODE" = "302" ]; then
+            echo "SUCCESS: Patch Download Link is verified!"
+            PATCH_SUCCESS=true
+            break
+          fi
+          if echo "$RELEASE_INFO" | grep -q '"assets"'; then
+            HAS_PATCH=$(echo "$RELEASE_INFO" | grep -i 'patch.bsdiff' || true)
+            if [ -n "$HAS_PATCH" ]; then
+              echo "SUCCESS: Patch asset confirmed via GitHub API!"
+              PATCH_SUCCESS=true
+              break
+            fi
+          fi
+          sleep 5
+          RELEASE_INFO=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO_NAME}/releases/tags/v1.0.${VERSION_CODE}" || true)
+        done
+        
+        if [ "$PATCH_SUCCESS" = "false" ]; then
+          echo "CRITICAL ERROR: Patch Link verification timed out. Release may not be fully published."
+          exit 1
+        fi
+        
+        echo "All public download links are perfectly validated and live!"
+
+    - name: Update Firebase Realtime Database Update Config
+      env:
+        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_CREDENTIALS }}
+      run: |
+        VERSION_CODE=${{ env.VERSION_CODE }}
+        REPO_NAME="${{ github.repository }}"
+        APK_URL="https://github.com/${REPO_NAME}/releases/download/v1.0.$VERSION_CODE/Life%20OS.apk"
+        
+        OWNER=$(echo "$REPO_NAME" | cut -d'/' -f1)
+        REPO=$(echo "$REPO_NAME" | cut -d'/' -f2)
+        
+        # Calculate MD5 checksum of the newly built app-release.apk for Delta Patch validation
+        APK_MD5=$(md5sum app/build/outputs/apk/release/app-release.apk | cut -d' ' -f1)
+        echo "Calculated target APK MD5 for validation: $APK_MD5"
+        
+        # Check if service account is available to obtain an OAuth2 access token
+        AUTH_HEADER=""
+        if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
+          echo "Authenticating using Firebase Service Account credentials..."
+          echo "$FIREBASE_SERVICE_ACCOUNT" > firebase-key.json
+          gcloud auth activate-service-account --key-file=firebase-key.json
+          TOKEN=$(gcloud auth print-access-token)
+          AUTH_HEADER="Authorization: Bearer $TOKEN"
+          rm -f firebase-key.json
+        else
+          echo "INFO: FIREBASE_CREDENTIALS secret is not set, attempting unauthenticated write..."
+        fi
+        
+        # Update UPDATE_CONFIG.json
+        if [ -n "$AUTH_HEADER" ]; then
+          curl -X PUT -H "Content-Type: application/json" -H "$AUTH_HEADER" \
+            -d "{\"Version_no\": $VERSION_CODE, \"Full_Apk_Url\": \"$APK_URL\", \"Patch_File_Url\": \"https://github.com/${REPO_NAME}/releases/download/v1.0.$VERSION_CODE/patch.bsdiff\", \"Patch_MD5\": \"$APK_MD5\", \"Is_Force_Update\": false, \"githubOwner\": \"$OWNER\", \"githubRepo\": \"$REPO\"}" \
+            "https://lifeosca.asia-southeast1.firebasedatabase.app/UPDATE_CONFIG.json"
+            
+          # Update versionId.json
+          curl -X PUT -H "Content-Type: application/json" -H "$AUTH_HEADER" \
+            -d "$VERSION_CODE" \
+            "https://lifeosca.asia-southeast1.firebasedatabase.app/versionId.json"
+        else
+          curl -X PUT -H "Content-Type: application/json" \
+            -d "{\"Version_no\": $VERSION_CODE, \"Full_Apk_Url\": \"$APK_URL\", \"Patch_File_Url\": \"https://github.com/${REPO_NAME}/releases/download/v1.0.$VERSION_CODE/patch.bsdiff\", \"Patch_MD5\": \"$APK_MD5\", \"Is_Force_Update\": false, \"githubOwner\": \"$OWNER\", \"githubRepo\": \"$REPO\"}" \
+            "https://lifeosca.asia-southeast1.firebasedatabase.app/UPDATE_CONFIG.json"
+            
+          # Update versionId.json
+          curl -X PUT -H "Content-Type: application/json" \
+            -d "$VERSION_CODE" \
+            "https://lifeosca.asia-southeast1.firebasedatabase.app/versionId.json"
+        fi
+

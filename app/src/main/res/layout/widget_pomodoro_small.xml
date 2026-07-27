@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/pomo_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="POMODORO 🎯"
+        android:textColor="#30D158"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:textAllCaps="true" />
+
+    <Chronometer
+        android:id="@+id/pomo_time_display"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/btn_pomo_start_pause"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/widget_button_background"
+        android:text="▶ START"
+        android:textColor="#FFFFFF"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="4dp"
+        android:clickable="true"
+        android:focusable="true"/>
+</LinearLayout>

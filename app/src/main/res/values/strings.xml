@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">Life OS</string>
+    <string name="accessibility_service_desc">Required to monitor active social apps and block addictive elements like Reels, Shorts, Spotlight, and Stories to keep you focused.</string>
+    
+    <!-- Firebase standard resource keys for auto-initialization -->
+    <string name="google_app_id">1:432934819080:android:919f6a7b8f1a2a56bcc8bd</string>
+    <string name="google_api_key">AIzaSyAzHCPmTOmkFV3i7-TJ7E4GMBiA9NIIn3I</string>
+    <string name="firebase_database_url">https://lifeosca.asia-southeast1.firebasedatabase.app/</string>
+    <string name="project_id">lifeosca</string>
+    <string name="gcm_defaultSenderId">432934819080</string>
+    <string name="default_web_client_id">432934819080-jn72ep6smqj8r4q46jj1gjqchepi91ue.apps.googleusercontent.com</string>
+
+    <!-- FCM Localization & Messaging String Resources -->
+    <string name="welcome_title">Welcome, %1$s!</string>
+    <string name="new_message_body">You have %1$d new message(s) from %2$s.</string>
+    <string name="new_chat_message_title">New message from %1$s</string>
+    <string name="new_chat_message_body">%1$s</string>
+    <string name="fcm_notification_channel_name">Community Chat</string>
+    <string name="fcm_notification_channel_desc">Notifications for community chat and direct messages</string>
+</resources>

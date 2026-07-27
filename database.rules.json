@@ -1,0 +1,46 @@
+{
+  "rules": {
+    "UPDATE_CONFIG": {
+      ".read": "true",
+      ".write": "true"
+    },
+    "versionId": {
+      ".read": "true",
+      ".write": "true"
+    },
+    "users": {
+      ".read": "auth != null",
+      "$username": {
+        ".write": "auth != null",
+        "focusTimer": {
+          "state": {
+            ".validate": "newData.val() === 'RUNNING' || newData.val() === 'PAUSED' || newData.val() === 'IDLE' || newData.val() === 'FOCUSING' || newData.val() === 'RELAXING' || newData.val() == null"
+          },
+          "status": {
+            ".validate": "newData.val() === 'RUNNING' || newData.val() === 'PAUSED' || newData.val() === 'IDLE' || newData.val() === 'FOCUSING' || newData.val() === 'RELAXING' || newData.val() == null"
+          },
+          "is_current_leader": {
+            ".validate": "newData.isNumber() || newData.isBoolean() || newData.val() == null"
+          },
+          "lastUpdatedTs": {
+            ".validate": "newData.isNumber() || newData.val() == null"
+          },
+          "accumulatedTimeMs": {
+            ".validate": "newData.isNumber() || newData.val() == null"
+          }
+        }
+      }
+    },
+    "bells": {
+      "$username": {
+        ".read": "auth != null",
+        "$requester": {
+          "$provider": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+          }
+        }
+      }
+    }
+  }
+}

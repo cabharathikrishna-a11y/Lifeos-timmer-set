@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Who is Focusing 🎯"
+        android:textColor="#8E8E93"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:textAllCaps="true" />
+
+    <LinearLayout
+        android:id="@+id/focus_pill_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/focus_status_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No one is focusing"
+            android:textColor="#AEAEB2"
+            android:textSize="14sp"
+            android:textStyle="normal"
+            android:gravity="center" />
+    </LinearLayout>
+</LinearLayout>

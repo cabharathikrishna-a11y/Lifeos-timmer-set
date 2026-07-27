@@ -1,0 +1,8 @@
+{
+  "name": "Life OS",
+  "description": "An all-in-one Productivity \u0026 Life OS featuring a nested task engine, focus timer, journal, and finance tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

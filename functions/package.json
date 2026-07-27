@@ -1,0 +1,19 @@
+{
+  "name": "chat-12month-retention-functions",
+  "version": "1.0.0",
+  "description": "Daily 12-Month Rolling Retention Cleanup for Firebase RTDB Chat Messages",
+  "scripts": {
+    "serve": "firebase serve --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^11.8.0",
+    "firebase-functions": "^4.3.1"
+  }
+}

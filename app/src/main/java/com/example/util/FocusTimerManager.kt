@@ -3922,6 +3922,17 @@ object FocusTimerManager {
 
     fun getOverlapSecondsForDate(record: FocusRecord, targetDateStr: String): Int {
         try {
+            val isManual = record.id.startsWith("manual_") ||
+                    record.notes.contains("MANUAL", ignoreCase = true) ||
+                    record.tag.contains("MANUAL", ignoreCase = true)
+            if (isManual) {
+                if (record.dateString == targetDateStr || record.dateString.isEmpty()) {
+                    return record.durationSeconds
+                } else {
+                    return 0
+                }
+            }
+
             val dateParser = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
             val targetDate = dateParser.parse(targetDateStr) ?: return record.durationSeconds
             val calendar = java.util.Calendar.getInstance()

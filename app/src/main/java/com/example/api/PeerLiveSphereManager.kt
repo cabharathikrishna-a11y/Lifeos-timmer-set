@@ -2,6 +2,9 @@ package com.example.api
 
 import android.content.Context
 import android.util.Log
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.example.util.childMs
 import com.example.util.parseToMs
 import com.google.firebase.database.DataSnapshot
@@ -169,8 +172,12 @@ object PeerLiveSphereManager {
                             val currentTag = timerSnapshot.child("Current_Tag").getValue(String::class.java) ?: "Study"
                             val timerMode = timerSnapshot.child("Timer_Mode").getValue(String::class.java) ?: "pomodoro"
                             val status = timerSnapshot.child("Status").getValue(String::class.java) ?: "Relaxing"
-                            val todayFocusMsFromTimer = timerSnapshot.childMs("Todays_Focus_Ms", "todayFocusMs")
+                            val nowMs = System.currentTimeMillis()
+                            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+
                             val lastUpdated = parseToMs(timerSnapshot.child("Last_Updated").value).let { if (it > 0L) it else com.example.util.TimeEngine.getTrueTimeMs() }
+                            val isTimerUpdatedToday = lastUpdated > 0L && SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(lastUpdated)) == todayStr
+                            val todayFocusMsFromTimer = if (isTimerUpdatedToday) timerSnapshot.childMs("Todays_Focus_Ms", "todayFocusMs") else 0L
 
                             val arenaSnapshot = snapshot.child("ARENA")
                             val displayName = arenaSnapshot.child("DisplayName").getValue(String::class.java)
@@ -250,7 +257,9 @@ object PeerLiveSphereManager {
                                 }
                             }
 
-                            val arenaTodayMs = arenaSnapshot.childMs("TODAY/Total_Focus_Ms", "Todays_Focus_Ms", "todayFocusMs")
+                            val arenaLastUpdated = parseToMs(arenaSnapshot.child("Last_Updated").value)
+                            val isArenaUpdatedToday = arenaLastUpdated > 0L && SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(arenaLastUpdated)) == todayStr
+                            val arenaTodayMs = if (isArenaUpdatedToday) arenaSnapshot.childMs("TODAY/Total_Focus_Ms", "Todays_Focus_Ms", "todayFocusMs") else 0L
                             val combinedTodayFocusMs = maxOf(todayFocusMsFromTimer, arenaTodayMs)
 
                             val state = PeerLiveState(

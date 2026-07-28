@@ -181,7 +181,13 @@ object DevicePresenceManager {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val todayStr = sdf.format(Date(nowMs))
 
-            val maxOtherTodayFocusMs = lbSnapshot?.childMs("Todays_Focus_Ms", "todayFocusMs") ?: 0L
+            val lbLastUpdated = lbSnapshot?.child("Last_Updated")?.getValue(Long::class.java) ?: 0L
+            val lbDateStr = if (lbLastUpdated > 0L) sdf.format(Date(lbLastUpdated)) else ""
+            val maxOtherTodayFocusMs = if (lbDateStr == todayStr) {
+                lbSnapshot?.childMs("Todays_Focus_Ms", "todayFocusMs") ?: 0L
+            } else {
+                0L
+            }
 
                 var localTodayFocusMs = providedLocalTodayFocusMs ?: run {
                     val db = com.example.data.AppDatabase.getInstance(context)
@@ -225,12 +231,20 @@ object DevicePresenceManager {
                     localTodayFocusMs = updatedSum
                 }
 
+                val finalAdoptedMs = if (maxOtherTodayFocusMs > localTodayFocusMs + 10_000L) {
+                    Log.w(TAG, "⚡ RTDB had stale today focus ms (${maxOtherTodayFocusMs}ms) not verified in Firestore. Correcting RTDB to true local focus ms (${localTodayFocusMs}ms)...")
+                    WeeklyStatsUpdater.updateWeeklyStats(context, realEmail, localTodayFocusMs, "")
+                    localTodayFocusMs
+                } else {
+                    maxOtherTodayFocusMs
+                }
+
                 appPrefs.edit()
-                    .putLong("max_other_today_ms_${sanitizedEmail}", maxOtherTodayFocusMs)
+                    .putLong("max_other_today_ms_${sanitizedEmail}", finalAdoptedMs)
                     .putString("adopted_today_date_${sanitizedEmail}", todayStr)
                     .apply()
 
-                Log.d(TAG, "Synchronized max other device today focus time: $maxOtherTodayFocusMs ms (localToday: $localTodayFocusMs)")
+                Log.d(TAG, "Synchronized today focus time: $finalAdoptedMs ms (localToday: $localTodayFocusMs)")
         } catch (e: Exception) {
             Log.e(TAG, "Error adopting highest today focus time from other devices", e)
         }
@@ -300,7 +314,12 @@ object DevicePresenceManager {
                 val deviceKey = getDeviceKey(context)
                 
                 val appPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                val maxOtherTodayMs = appPrefs.getLong("max_other_today_ms_${sanitizedEmail}", 0L)
+                val adoptedTodayDate = appPrefs.getString("adopted_today_date_${sanitizedEmail}", "")
+                val maxOtherTodayMs = if (adoptedTodayDate == todayStr) {
+                    appPrefs.getLong("max_other_today_ms_${sanitizedEmail}", 0L)
+                } else {
+                    0L
+                }
                 val maxOtherPast7Ms = appPrefs.getLong("max_other_past7_ms_${sanitizedEmail}", 0L)
                 val maxOtherPast30Ms = appPrefs.getLong("max_other_past30_ms_${sanitizedEmail}", 0L)
                 val maxOtherAllTimeMs = appPrefs.getLong("max_other_alltime_ms_${sanitizedEmail}", 0L)

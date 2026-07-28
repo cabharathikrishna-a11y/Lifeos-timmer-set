@@ -8493,7 +8493,8 @@ fun FriendsFocusLeaderboardTable(
                 }
                 val lbTodaySecs = ((matchedLbPeer?.totalFocusMs ?: 0L) / 1000L).toInt()
 
-                val baseFocusedSecs = maxOf(maxDeviceTodaySecs, ((peerRemote?.todayFocusMs ?: 0L) / 1000L).toInt(), lbTodaySecs)
+                val isMe = isMeUser(username, u.userId ?: "", nameToShow)
+                val baseFocusedSecs = if (isMe) myTodaySeconds else maxOf(maxDeviceTodaySecs, ((peerRemote?.todayFocusMs ?: 0L) / 1000L).toInt(), lbTodaySecs)
                 val totalFocusedSecs = baseFocusedSecs + peerActiveSecs
 
                 val isOnline = u.isOnline == true

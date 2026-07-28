@@ -6,6 +6,13 @@ import java.util.Locale
 object TimelineSyncEngine {
 
     fun calculateAccumulatedFocusMs(timeline: List<TimelineEvent>, currentStatus: String): Long {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfTodayMs = calendar.timeInMillis
+
         var totalFocusMs = 0L
         var lastFocusAnchor = 0L
 
@@ -16,7 +23,10 @@ object TimelineSyncEngine {
             } else if (action == "pause" || action == "paused" || action == "break_started" || action == "break start" || action == "session_end" || action == "completed" || action == "end") {
                 if (lastFocusAnchor > 0L) {
                     if (event.timestamp > lastFocusAnchor) {
-                        totalFocusMs += (event.timestamp - lastFocusAnchor)
+                        val effectiveStart = maxOf(lastFocusAnchor, startOfTodayMs)
+                        if (event.timestamp > effectiveStart) {
+                            totalFocusMs += (event.timestamp - effectiveStart)
+                        }
                     }
                     lastFocusAnchor = 0L
                 }
@@ -47,7 +57,8 @@ object TimelineSyncEngine {
             }
             if (lastFocusAnchor > 0L) {
                 val trueTime = TimeEngine.getTrueTimeMs()
-                val liveDelta = trueTime - lastFocusAnchor
+                val effectiveStart = maxOf(lastFocusAnchor, startOfTodayMs)
+                val liveDelta = trueTime - effectiveStart
                 // Guard against stale anchors or corrupted timestamps (> 24 hours)
                 if (liveDelta in 1L..86_400_000L) {
                     totalFocusMs += liveDelta

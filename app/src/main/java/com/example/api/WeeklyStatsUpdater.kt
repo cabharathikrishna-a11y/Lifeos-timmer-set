@@ -123,7 +123,12 @@ object WeeklyStatsUpdater {
             // Recalculate adopted stats with fresh SQLite records
             DevicePresenceManager.adoptHighestTodayFocusMsFromOtherDevices(context, email, todayFocusMs)
 
-            val maxOtherTodayMs = appPrefs.getLong("max_other_today_ms_${sanitizedEmail}", 0L)
+            val adoptedTodayDate = appPrefs.getString("adopted_today_date_${sanitizedEmail}", "")
+            val maxOtherTodayMs = if (adoptedTodayDate == todayStr) {
+                appPrefs.getLong("max_other_today_ms_${sanitizedEmail}", 0L)
+            } else {
+                0L
+            }
             val maxOtherPast7Ms = appPrefs.getLong("max_other_past7_ms_${sanitizedEmail}", 0L)
             val maxOtherPast30Ms = appPrefs.getLong("max_other_past30_ms_${sanitizedEmail}", 0L)
             val maxOtherAllTimeMs = appPrefs.getLong("max_other_alltime_ms_${sanitizedEmail}", 0L)

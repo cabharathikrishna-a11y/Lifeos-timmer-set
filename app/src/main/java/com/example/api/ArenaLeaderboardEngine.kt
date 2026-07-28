@@ -2,6 +2,9 @@ package com.example.api
 
 import android.content.Context
 import android.util.Log
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.example.data.AppDatabase
 import com.example.util.TimeEngine
 import com.example.util.childMs
@@ -120,16 +123,21 @@ object ArenaLeaderboardEngine {
                             ?: child.child("customEmoji").getValue(String::class.java)
                             ?: ""
 
+                        val nowMs = System.currentTimeMillis()
+                        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+                        val lastUpdated = parseToMs(child.child("Last_Updated").value).let { if (it > 0L) it else TimeEngine.getTrueTimeMs() }
+                        val lastUpdatedDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(lastUpdated))
+                        val isUpdatedToday = lastUpdatedDateStr == todayStr
+
+                        val rawTodayLbMs = child.childMs("Todays_Focus_Ms", "todayFocusMs", "TODAY/Total_Focus_Ms")
+                        val todayLbMs = if (isUpdatedToday) rawTodayLbMs else 0L
+
                         val totalFocusMs = when (activePeriod) {
-                            "TODAY" -> child.childMs("Todays_Focus_Ms", "todayFocusMs", "TODAY/Total_Focus_Ms")
+                            "TODAY" -> todayLbMs
                             "PAST_7_DAYS" -> child.childMs("Past_7_Days_Focus_Ms", "PAST_7_DAYS/Total_Focus_Ms")
                             "PAST_30_DAYS" -> child.childMs("Past_30_Days_Focus_Ms", "PAST_30_DAYS/Total_Focus_Ms")
                             else -> child.childMs("All_Time_Focus_Ms", "ALL_TIME/Total_Focus_Ms")
                         }
-
-                        val lastUpdated = parseToMs(child.child("Last_Updated").value).let { if (it > 0L) it else TimeEngine.getTrueTimeMs() }
-
-                        val todayLbMs = child.childMs("Todays_Focus_Ms", "todayFocusMs", "TODAY/Total_Focus_Ms")
 
                         val myCleanEmail = myEmail.lowercase().trim()
                         val mySanitized = DevicePresenceManager.sanitizeEmail(myEmail)
@@ -342,16 +350,18 @@ object ArenaLeaderboardEngine {
                                 ?: arenaSnapshot.child("topSubject").getValue(String::class.java)
                                 ?: "None"
 
+                            val arenaLastUpdated = parseToMs(arenaSnapshot.child("Last_Updated").value)
+                            val nowMs = System.currentTimeMillis()
+                            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+                            val isArenaUpdatedToday = arenaLastUpdated > 0L && SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(arenaLastUpdated)) == todayStr
+
                             val todayLbMs = run {
-                                val ms = arenaSnapshot.childMs("Todays_Focus_Ms", "todayFocusMs", "TODAY/Total_Focus_Ms")
+                                val ms = if (isArenaUpdatedToday) arenaSnapshot.childMs("Todays_Focus_Ms", "todayFocusMs", "TODAY/Total_Focus_Ms") else 0L
                                 if (ms > 0L) ms else rawWeeklyStatsMap[email]?.rawTodayFocusMs ?: 0L
                             }
 
                             val totalFocusMs = when (activePeriod) {
-                                "TODAY" -> {
-                                    val ms = arenaSnapshot.childMs("Todays_Focus_Ms", "todayFocusMs", "TODAY/Total_Focus_Ms")
-                                    if (ms > 0L) ms else rawWeeklyStatsMap[email]?.totalFocusMs ?: 0L
-                                }
+                                "TODAY" -> todayLbMs
                                 "PAST_7_DAYS" -> {
                                     val ms = arenaSnapshot.childMs("Past_7_Days_Focus_Ms", "PAST_7_DAYS/Total_Focus_Ms")
                                     if (ms > 0L) ms else rawWeeklyStatsMap[email]?.totalFocusMs ?: 0L
@@ -636,10 +646,19 @@ object ArenaLeaderboardEngine {
                 if (diffMs >= 1000L) {
                     Log.i(TAG, "⚡ Leaderboard discrepancy detected! RTDB LEADERBOARD Todays_Focus_Ms (${rtdbLeaderboardTodayMs}ms) > Local Room SQL DB (${localTodayMs}ms). Triggering Firestore download & sync...")
                     FirestoreArchiver.pullAndSyncFocusHistoryFromFirestore(ctx, email)
+
+                    val recheckHistory = db.localHistoryVaultDao().getAllHistoryDirect().filter {
+                        it.userEmail.isBlank() || it.userEmail.lowercase().trim() == targetEmail
+                    }
+                    val recheckTodayMs = recheckHistory.filter { it.date_string == todayStr }.sumOf { it.total_focus_ms }
+                    if (rtdbLeaderboardTodayMs > recheckTodayMs + 2000L) {
+                        Log.w(TAG, "⚡ RTDB leaderboard had stale value (${rtdbLeaderboardTodayMs}ms) not found in Firestore. Correcting RTDB to local true value (${recheckTodayMs}ms)...")
+                        WeeklyStatsUpdater.updateWeeklyStats(ctx, email, recheckTodayMs, "")
+                    }
                 } else if (diffMs <= -1000L) {
                     Log.i(TAG, "⚡ Leaderboard discrepancy detected! Local Room SQL DB (${localTodayMs}ms) > RTDB LEADERBOARD Todays_Focus_Ms (${rtdbLeaderboardTodayMs}ms). Triggering upload to Firestore & RTDB...")
                     com.example.util.StateReconciliationHelper.runUnifiedReconciliation(ctx, db)
-                    WeeklyStatsUpdater.updateWeeklyStats(ctx, email, 0L, "")
+                    WeeklyStatsUpdater.updateWeeklyStats(ctx, email, localTodayMs, "")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error in checkAndReconcileLeaderboardDiscrepancy for $email", e)

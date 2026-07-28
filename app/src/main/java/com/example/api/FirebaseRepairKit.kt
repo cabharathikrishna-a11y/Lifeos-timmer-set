@@ -445,9 +445,21 @@ object FirebaseRepairKit {
                                     ?: child.child("CustomEmoji").getValue(String::class.java)
                                     ?: "👤"
 
-                                val existingLbTodayMs = lbChild.childMs("Todays_Focus_Ms")
-                                val arenaTodayMs = arenaSnap.childMs("TODAY/Total_Focus_Ms", "Todays_Focus_Ms", "todayFocusMs")
-                                    .let { if (it > 0L) it else child.childMs("Todays_Focus_Ms", "todayFocusMs") }
+                                val nowMs = System.currentTimeMillis()
+                                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+
+                                val lbLastUpdated = parseToMs(lbChild.child("Last_Updated").value)
+                                val isLbUpdatedToday = lbLastUpdated > 0L && SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(lbLastUpdated)) == todayStr
+                                val existingLbTodayMs = if (isLbUpdatedToday) lbChild.childMs("Todays_Focus_Ms") else 0L
+
+                                val arenaLastUpdated = parseToMs(arenaSnap.child("Last_Updated").value)
+                                val isArenaUpdatedToday = arenaLastUpdated > 0L && SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(arenaLastUpdated)) == todayStr
+                                val arenaTodayMs = if (isArenaUpdatedToday) {
+                                    arenaSnap.childMs("TODAY/Total_Focus_Ms", "Todays_Focus_Ms", "todayFocusMs")
+                                        .let { if (it > 0L) it else child.childMs("Todays_Focus_Ms", "todayFocusMs") }
+                                } else {
+                                    0L
+                                }
                                 val rawTodayMs = maxOf(existingLbTodayMs, arenaTodayMs)
                                 val todayFocusMs = minOf(86_400_000L, rawTodayMs)
 
@@ -466,14 +478,7 @@ object FirebaseRepairKit {
                                     .let { if (it > 0L) it else child.childMs("All_Time_Focus_Ms") }
                                 val allTimeFocusMs = maxOf(existingLbAllTimeMs, arenaAllTimeMs)
 
-                                val nowMs = System.currentTimeMillis()
-                                val lastUpdatedMs = maxOf(
-                                    parseToMs(lbChild.child("Last_Updated").value),
-                                    parseToMs(arenaSnap.child("Last_Updated").value),
-                                    nowMs
-                                )
-
-                                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+                                val lastUpdatedMs = maxOf(lbLastUpdated, arenaLastUpdated, nowMs)
 
                                 val leaderboardData = mapOf<String, Any?>(
                                     "email" to rawEmail,

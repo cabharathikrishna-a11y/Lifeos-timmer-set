@@ -206,10 +206,7 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
         val pendingSecs = com.example.util.FocusTimerManager.pendingFocusReview.value?.let { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) } ?: 0
         val localCompletedMs = (completedTodaySecs + pendingSecs) * 1000L
 
-        val myCard = peerUiCards.find { it.peerState.userId.lowercase().trim() == myEmail.lowercase().trim() }
-        val myLeaderboardPeer = leaderboard.find { it.isMe || it.email.lowercase().trim() == myEmail.lowercase().trim() }
-        val leaderboardTodayMs = if (leaderboardPeriod == "TODAY") (myLeaderboardPeer?.totalFocusMs ?: 0L) else 0L
-        val baseCompletedMs = maxOf(localCompletedMs, myCard?.peerState?.todayFocusMs ?: 0L, leaderboardTodayMs)
+        val baseCompletedMs = localCompletedMs
 
         var localActiveMs = 0L
         val hasActiveSession = (isTimerRunning || isStopwatchActive || accumulatedSessionTimeMs > 0L) && com.example.util.FocusTimerManager.pendingFocusReview.value == null

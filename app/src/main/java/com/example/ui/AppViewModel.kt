@@ -9414,6 +9414,8 @@ class AppViewModel(
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
     }
 
+    private var lastSelfRtdbFixMs = 0L
+
     private fun startPeerLiveSphereTicker() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             while (true) {
@@ -9427,8 +9429,29 @@ class AppViewModel(
 
                     val leaderboardList = com.example.api.ArenaLeaderboardEngine.leaderboardFlow.value
 
+                    val myEmail = _userEmail.value.lowercase().trim()
+                    val mySanitizedEmail = if (myEmail.isNotEmpty()) com.example.api.DevicePresenceManager.sanitizeEmail(myEmail) else ""
+
+                    // Compute local ground truth for "Me" on this device
+                    val focusRecords = com.example.util.FocusTimerManager.focusRecords.value
+                    val completedTodaySecs = focusRecords.sumOf { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) }
+                    val pendingSecs = com.example.util.FocusTimerManager.pendingFocusReview.value?.let { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) } ?: 0
+                    val myLocalCompletedMs = (completedTodaySecs + pendingSecs) * 1000L
+
+                    var myLocalActiveMs = 0L
+                    val isTimerRunning = com.example.util.FocusTimerManager.isTimerRunning.value
+                    val isStopwatchActive = com.example.util.FocusTimerManager.isStopwatchActive.value
+                    val accumulatedSessionTimeMs = com.example.util.FocusTimerManager.accumulatedSessionTimeMs.value
+                    val hasActiveSession = (isTimerRunning || isStopwatchActive || accumulatedSessionTimeMs > 0L) && com.example.util.FocusTimerManager.pendingFocusReview.value == null
+                    if (hasActiveSession) {
+                        myLocalActiveMs = accumulatedSessionTimeMs
+                    }
+                    val myLocalTrueTotalMs = myLocalCompletedMs + myLocalActiveMs
+
                     val uiCards = peersMap.values.map { peer ->
                         val peerEmailClean = peer.userId.lowercase().trim()
+                        val isMe = myEmail.isNotEmpty() && (peerEmailClean == myEmail || (mySanitizedEmail.isNotEmpty() && com.example.api.DevicePresenceManager.sanitizeEmail(peerEmailClean) == mySanitizedEmail))
+
                         val matchedLeaderboardPeer = leaderboardList.find { lb ->
                             val email1Norm = lb.email.lowercase().replace(".", "").replace("_", "").trim()
                             val email2Norm = peerEmailClean.replace(".", "").replace("_", "").trim()
@@ -9439,9 +9462,43 @@ class AppViewModel(
                         val liveComputedTotalMs = liveBaseTodayMs + maxOf(0L, activeSessionFocusMs)
                         val leaderboardTotalMs = matchedLeaderboardPeer?.totalFocusMs ?: 0L
 
-                        val elapsedMs = maxOf(liveComputedTotalMs, leaderboardTotalMs)
+                        val elapsedMs: Long
+                        val updatedPeerState: com.example.api.PeerLiveState
+
+                        if (isMe) {
+                            elapsedMs = myLocalTrueTotalMs
+                            updatedPeerState = peer.copy(todayFocusMs = myLocalCompletedMs)
+
+                            // Check if RTDB has a wrong base value for "Me" (excluding active timer)
+                            val rtdbBaseDiscrepancyMs = maxOf(
+                                Math.abs(liveBaseTodayMs - myLocalCompletedMs),
+                                Math.abs(leaderboardTotalMs - myLocalCompletedMs)
+                            )
+                            val now = System.currentTimeMillis()
+                            if (rtdbBaseDiscrepancyMs > 2000L && (now - lastSelfRtdbFixMs >= 5000L)) {
+                                lastSelfRtdbFixMs = now
+                                android.util.Log.i("AppViewModel", "⚡ Self base focus discrepancy detected in friends details! Local completed = ${myLocalCompletedMs}ms, RTDB timer = ${liveBaseTodayMs}ms, RTDB leaderboard = ${leaderboardTotalMs}ms. Correcting RTDB immediately...")
+                                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    try {
+                                        // Update local preference cache
+                                        val appPrefs = getApplication<android.app.Application>().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+                                        appPrefs.edit()
+                                            .putLong("max_other_today_ms_${mySanitizedEmail}", myLocalCompletedMs)
+                                            .putString("adopted_today_date_${mySanitizedEmail}", todayStr)
+                                            .apply()
+
+                                        com.example.api.WeeklyStatsUpdater.updateWeeklyStats(getApplication(), myEmail, myLocalCompletedMs, "")
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("AppViewModel", "Error auto-correcting RTDB self focus time", e)
+                                    }
+                                }
+                            }
+                        } else {
+                            elapsedMs = maxOf(liveComputedTotalMs, leaderboardTotalMs)
+                            updatedPeerState = peer
+                        }
+
                         val formattedTime = com.example.api.TimelineSyncEngine.formatTimeMsToHhMmSs(elapsedMs)
-                        val updatedPeerState = peer
                         com.example.api.PeerUiCardModel(
                             peerState = updatedPeerState,
                             formattedLiveTime = formattedTime,
@@ -9449,7 +9506,6 @@ class AppViewModel(
                         )
                     }
                     _peerUiCards.value = uiCards
-                    val myEmail = _userEmail.value
                     if (myEmail.isNotEmpty()) {
                         com.example.api.ArenaLeaderboardEngine.recomputeLeaderboard(myEmail)
                     }
